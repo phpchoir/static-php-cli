@@ -1,0 +1,92 @@
+name: Build Release Artifacts
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-release-artifacts:
+    name: "Build Release Artifacts"
+    runs-on: ${{ matrix.operating-system }}
+    strategy:
+      fail-fast: false
+      matrix:
+        dependencies:
+          - "locked"
+        php-version:
+          - "8.1"
+        operating-system:
+          - "ubuntu-latest"
+          - "macos-latest"
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v4"
+
+      - name: "Install PHP"
+        uses: "shivammathur/setup-php@v2"
+        with:
+          coverage: none
+          tools: composer:v2
+          php-version: "${{ matrix.php-version }}"
+          ini-values: memory_limit=-1
+
+      - name: "Get Composer Cache Directory"
+        id: composer-cache
+        run: |
+          echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: "Cache Composer dependencies"
+        uses: "actions/cache@v3"
+        with:
+          path: "${{ steps.composer-cache.outputs.dir }}"
+          key: "php-${{ matrix.php-version }}-locked-composer-${{ hashFiles('**/composer.lock') }}"
+          restore-keys: |
+            php-${{ matrix.php-version }}-locked-composer-
+      - name: "Install locked dependencies"
+        run: "composer install --no-interaction --no-progress"
+
+      - name: "Build phpmicro"
+        run: |
+          bin/spc fetch --all --with-php=8.1
+          bin/spc build pcntl,posix,mbstring,tokenizer,phar --build-micro
+
+      - name: "Build PHAR file"
+        run: "composer build:phar"
+
+      - name: "Generate Executable"
+        run: "bin/spc micro:combine spc.phar"
+
+      - name: "Archive Executable"
+        run: |
+          mv my-app spc
+          OS=""
+          if [ "${{ matrix.operating-system }}" = "ubuntu-latest" ]; then
+              OS="linux-x86_64"
+          elif [ "${{ matrix.operating-system }}" = "macos-latest" ]; then
+              OS="macos-x86_64"
+          fi
+          tar -czf spc-$OS.tar.gz spc
+          echo "filename=spc-$OS.tar.gz" >> $GITHUB_ENV
+          echo "OS=$OS" >> $GITHUB_ENV
+
+      - name: "Test PHAR file"
+        run: "./spc.phar dev:extensions"
+
+      - name: "Upload Release Asset"
+        uses: actions/upload-release-asset@v1
+        with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ${{ env.filename }}
+        asset_name: ${{ env.filename }}
+        asset_content_type: application/gzip
+
+      - name: "Upload Artifact"
+        uses: actions/upload-artifact@v3
+        with:
+          path: spc
+          name: spc-${{ env.OS }}
