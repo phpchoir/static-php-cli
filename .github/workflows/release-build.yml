@@ -53,7 +53,8 @@ jobs:
       - name: "Build phpmicro"
         run: |
           bin/spc fetch --all --with-php=8.1
-          bin/spc build pcntl,posix,mbstring,tokenizer,phar --build-micro
+          SPC_USE_SUDO=yes bin/spc doctor --auto-fix
+          bin/spc build pcntl,posix,mbstring,tokenizer,phar --build-micro --debug
 
       - name: "Build PHAR file"
         run: "composer build:phar"
